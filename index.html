@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Teleprompter</title>
+  <style>
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: white;
+      overflow: hidden;
+    }
+
+    .controls {
+      position: fixed;
+      top: 0;
+      width: 100%;
+      background: rgba(0, 0, 0, 0.97);
+      padding: 10px 14px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      z-index: 1000;
+      box-sizing: border-box;
+      border-bottom: 1px solid #333;
+    }
+
+    button {
+      padding: 7px 14px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      background: #4caf50;
+      color: white;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #45a049;
+    }
+
+    #wpm {
+      width: 70px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      padding: 8px;
+      background: #222;
+      color: white;
+      box-sizing: border-box;
+      text-align: center;
+    }
+
+    textarea {
+      width: 260px;
+      height: 60px;
+      resize: none;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      padding: 6px 8px;
+      background: #222;
+      color: white;
+      box-sizing: border-box;
+    }
+
+    label {
+      font-size: 13px;
+      color: #ccc;
+    }
+
+    .shortcut-guide {
+      font-size: 12px;
+      color: #999;
+    }
+
+    #wpm-unit {
+      font-size: 13px;
+      color: #aaa;
+    }
+
+    #stage {
+      position: fixed;
+      top: 90px;
+      left: 0;
+      width: 100%;
+      bottom: 0;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+    }
+
+    #column {
+      width: min(680px, 72%);
+      position: relative;
+      overflow: hidden;
+    }
+
+    #script {
+      font-size: 38px;
+      line-height: 1.8;
+      text-align: center;
+      white-space: pre-line;
+      word-break: break-word;
+      position: absolute;
+      width: 100%;
+      left: 0;
+      color: #fff;
+      padding: 0 8px;
+      box-sizing: border-box;
+    }
+
+    #fade-top {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 80px;
+      background: linear-gradient(to bottom, #111 0%, transparent 100%);
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #fade-bottom {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 100px;
+      background: linear-gradient(to top, #111 0%, transparent 100%);
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #center-line {
+      position: absolute;
+      left: 0; right: 0;
+      top: 50%;
+      height: 2px;
+      background: rgba(76, 175, 80, 0.18);
+      pointer-events: none;
+      z-index: 5;
+    }
+
+  </style>
+</head>
+
+<body>
+
+  <div class="controls">
+    <button id="btn-toggle">&#9654; Start</button>
+    <button id="btn-restart">&#8634; Restart</button>
+    <label>Speed:</label>
+    <input type="text" id="wpm" inputmode="numeric" value="130" placeholder="WPM">
+    <span id="wpm-unit">WPM (Enter to set)</span>
+    <textarea id="inputText" placeholder="Paste your script here..."></textarea>
+    <button id="btn-load">Load Script</button>
+    <span class="shortcut-guide">
+      Space = Start/Pause &nbsp;|&nbsp; R = Restart &nbsp;|&nbsp; Enter = Load
+    </span>
+  </div>
+
+  <div id="stage">
+    <div id="column">
+      <div id="fade-top"></div>
+      <div id="center-line"></div>
+      <div id="script"></div>
+      <div id="fade-bottom"></div>
+    </div>
+  </div>
+
+  <script>
+
+    const scriptEl  = document.getElementById("script");
+    const wpmEl     = document.getElementById("wpm");
+    const inputText = document.getElementById("inputText");
+    const btnToggle = document.getElementById("btn-toggle");
+    const stage     = document.getElementById("stage");
+
+    let position    = 0;
+    let animation;
+    let isScrolling = false;
+    let currentWpm  = 130;
+    let lastTime    = null;
+
+    function isTyping() {
+      return document.activeElement === inputText || document.activeElement === wpmEl;
+    }
+
+    function stageHeight() {
+      return stage.offsetHeight;
+    }
+
+    // Pixels the script moves per word, based on its actual rendered height
+    function pixelsPerWord() {
+      const words = scriptEl.textContent.trim().split(/\s+/).filter(Boolean).length || 1;
+      return scriptEl.offsetHeight / words;
+    }
+
+    function applyWpm() {
+      const val = parseInt(wpmEl.value, 10);
+      if (!isNaN(val) && val > 0) {
+        currentWpm = Math.min(val, 1000);
+      }
+      wpmEl.value = currentWpm;
+      wpmEl.blur();
+    }
+
+    function setScriptText(text) {
+      scriptEl.textContent = text;
+      position = stageHeight();
+      scriptEl.style.top = position + "px";
+    }
+
+    function loadScript() {
+      setScriptText(inputText.value);
+      inputText.blur();
+    }
+
+    function scrollText(now) {
+      if (lastTime === null) lastTime = now;
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+
+      const pxPerSec = (currentWpm / 60) * pixelsPerWord();
+      position -= pxPerSec * dt;
+      scriptEl.style.top = position + "px";
+
+      if (position < -scriptEl.offsetHeight) {
+        isScrolling = false;
+        btnToggle.textContent = "\u25B6 Start";
+      } else {
+        animation = requestAnimationFrame(scrollText);
+      }
+    }
+
+    function startScroll() {
+      cancelAnimationFrame(animation);
+      isScrolling = true;
+      lastTime = null;
+      btnToggle.textContent = "\u23F8 Pause";
+      animation = requestAnimationFrame(scrollText);
+    }
+
+    function stopScroll() {
+      cancelAnimationFrame(animation);
+      isScrolling = false;
+      btnToggle.textContent = "\u25B6 Start";
+    }
+
+    function toggleScroll() {
+      isScrolling ? stopScroll() : startScroll();
+    }
+
+    function restartScroll() {
+      cancelAnimationFrame(animation);
+      position = stageHeight();
+      scriptEl.style.top = position + "px";
+      startScroll();
+    }
+
+    document.getElementById("btn-toggle").addEventListener("click", toggleScroll);
+    document.getElementById("btn-restart").addEventListener("click", restartScroll);
+    document.getElementById("btn-load").addEventListener("click", loadScript);
+
+    document.addEventListener("keydown", function (e) {
+      if (document.activeElement === wpmEl) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          applyWpm();
+        }
+        return;
+      }
+
+      if (isTyping()) {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          loadScript();
+        }
+        return;
+      }
+
+      if (e.code === "Space") { e.preventDefault(); toggleScroll(); }
+      if (e.key.toLowerCase() === "r") { e.preventDefault(); restartScroll(); }
+      if (e.key === "Enter") { e.preventDefault(); loadScript(); }
+    });
+
+    setScriptText("Paste your script in the box above,\nthen press Load Script or Enter\nto begin.");
+
+  </script>
+
+</body>
+</html>
